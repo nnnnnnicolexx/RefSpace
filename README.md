@@ -113,9 +113,7 @@
 
 ## 当前进度与验证范围
 
-项目当前处于 **0.1 开发准备阶段**，仓库已完成产品规则定义、架构设计与首发平台方案核验，尚未包含本地服务端实现、管理端页面或桌面安装包。
-
-开发按“先证明真实 AI 调用链与会话隔离，再铺开管理端与桌面封装”的顺序推进：
+项目当前处于 **0.1 内部开发阶段**。本机核心服务、Antigravity 插件束（`MCP + Hooks + Rules`）、多格式按需读取引擎与本地 HTML 管理端已完成首版代码实现并通过自动化回归检查；真实业务文件的双窗口人工试跑与 Electron 桌面安装包仍在后续验收范围。
 
 ```mermaid
 flowchart TD
@@ -131,14 +129,38 @@ flowchart TD
     H --> I["阶段 6：Electron 桌面封装与更多工作台逐个适配"]
 ```
 
-| 阶段与范围 | 当前状态与验收门槛 |
+| 阶段与范围 | 现在能验证什么 |
 | --- | --- |
-| ① 首发工作台接入验证 | 待实施。使用 Antigravity 的 `Plugin + MCP + Hooks` 机制传入宿主 `conversationId`，验收真实文件读取与双窗口独立引用，确认单次临时引用在回合结束后自动恢复原默认。 |
-| ② 本地引用核心与沙箱 | 待实施。完成固定空间编号、简称、多文件／多目录挂载、只读白名单校验与失联后重新关联，重启服务后引用关系完整恢复。 |
-| ③ 会话持续引用服务 | 待实施。覆盖绑定、沿用、替换、追加、移除、清空与“仅本次使用”七类流转，验证歧义回滚与文档内容防注入。 |
-| ④ 多格式读取与表格计算 | 待实施。打通 `.md`／`.txt`／`.docx`／`.pdf` 按需定位，以及 `.xlsx`／`.xlsm`／`.csv` 的多区域识别、合并格展开、前导零保真与确定性统计，核对结果与原件一致。 |
-| ⑤ 本地管理界面 | 待实施。采用浅色紧凑工作台布局，仅保留空间、来源列表与连接状态三个核心区域，不常驻大块提示；分别真实检测服务运行、文件可读与平台连接状态。 |
-| ⑥ 桌面内测与平台扩展 | 待实施。封装 Electron 安装包，明确关窗后台运行与彻底退出的生命周期；其他 AI 工作台逐个按同一套会话隔离标准实测后再声明支持。 |
+| ① 首发工作台接入验证 | 已提供 [Antigravity 插件束](plugins/refspace/)（含 `Stdio / HTTP MCP` 与 `PreInvocation / PreToolUse / Stop` 钩子）。自动化测试已验证宿主 `conversationId` 强制覆写、双窗口并发隔离及 `这次只用` 回合结束自动恢复；待完成真实对话窗口人工试跑。 |
+| ② 本地引用核心与沙箱 | 已实现 SQLite WAL 注册表与 `realpath` 只读白名单沙箱。已验证固定空间编号改名保留、跨目录软链接拦截、文件夹移走标记 `needs_relink` 及重新关联恢复。 |
+| ③ 会话持续引用服务 | 已实现绑定、沿用、替换、追加、移除、清空与“仅本次使用”七类流转，已验证重名歧义／来源不可读时保留原范围，以及文档内指令文本防注入。 |
+| ④ 多格式读取与表格计算 | 已实现 `.md`／`.txt`／`.docx`／`.pdf`／`.json` 章节提取，以及 `.xlsx`／`.xlsm`／`.csv` 稀疏解析（跳过百万空格式行、同页多区域分离、合并格展开、分段前导零与长编号保真、`0`/`false` 保留、未缓存公式提示、拆箱去重聚合与原件修改后即时重读）。 |
+| ⑤ 本地管理界面 | 已实现浅色紧凑管理页（`src/refspace/ui/`），支持资料空间管理、访达原生选目录／文件、按需结构预览抽屉与三项独立健康检测。 |
+| ⑥ 桌面内测与平台扩展 | 待实施。后续封装 Electron 安装包以省去命令行启动，并按同一会话隔离标准逐个验证其他 AI 工作台。 |
+
+## 开发者快速开始
+
+仓库仅依赖 **Python 3.9+ 标准库**（内置 `sqlite3`、`zipfile`、`xml.etree`、`http.server`），无需 `npm` 或 `pip` 安装第三方包。
+
+在项目根目录运行编译与自动化验收检查：
+
+```sh
+bash scripts/check.sh
+```
+
+若要使用虚构样例体验本地管理界面与 Antigravity 调用（演示文件与测试数据库保存在已被 Git 忽略的 `.refspace/` 目录中）：
+
+```sh
+# 1. 生成虚构多格式样例（含 .xlsx / .docx / .pdf / .md / .csv）并登记演示空间
+PYTHONPATH=src REFSPACE_DB_PATH=.refspace/demo.db python3 -m refspace seed-demo
+
+# 2. 启动本地管理界面（默认 http://127.0.0.1:17890 ，同时提供 /mcp 端点）
+PYTHONPATH=src REFSPACE_DB_PATH=.refspace/demo.db python3 -m refspace serve
+```
+
+在 Antigravity 中打开本仓库工作区时，`.agents/plugins.json` 会自动发现 `plugins/refspace` 插件；如需让本机所有工作区共享该插件，可运行 `PYTHONPATH=src python3 -m refspace install-plugin` 同步至 `~/.gemini/config/plugins/refspace`。
+
+[自动检查工作流](.github/workflows/check.yml) · [插件配置](plugins/refspace/plugin.json) · [会话规则](plugins/refspace/rules/AGENTS.md) · [多格式验证用例](tests/run_all_tests.py)
 
 ## 数据、隐私与接入边界
 

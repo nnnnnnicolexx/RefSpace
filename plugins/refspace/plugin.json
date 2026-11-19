@@ -1,0 +1,17 @@
+{
+  "name": "refspace",
+  "displayName": "引知 RefSpace",
+  "version": "0.1.0",
+  "description": "本地资料引用中心：将本机文件夹、表格与办公文档登记为命名资料空间，按会话持续默认引用并严格隔离多窗口。",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "nnnnnnicolexx",
+    "url": "https://github.com/nnnnnnicolexx"
+  },
+  "repository": "https://github.com/nnnnnnicolexx/RefSpace",
+  "suggestedPrompts": [
+    "查看当前会话绑定的资料空间与本机已登记的空间清单",
+    "引用杭州仓，结合里面的规则文档与明细表格回答问题",
+    "这次只用客户合同库核对结算条款，结束后保留原默认空间"
+  ]
+}

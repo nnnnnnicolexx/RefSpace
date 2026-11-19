@@ -1,0 +1,31 @@
+{
+  "refspace-session-lifecycle": {
+    "enabled": true,
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ./hooks/lifecycle.py",
+        "timeout": 5
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp_refspace_.*|call_mcp_tool",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./hooks/lifecycle.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ./hooks/lifecycle.py",
+        "timeout": 5
+      }
+    ]
+  }
+}

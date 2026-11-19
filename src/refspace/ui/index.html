@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>引知 RefSpace · 本地资料引用中心</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">RS</div>
+        <div class="brand-text">
+          <div class="brand-title">引知 RefSpace</div>
+          <div class="brand-sub">本地资料引用中心</div>
+        </div>
+      </div>
+
+      <nav class="primary-nav" aria-label="主导航">
+        <button class="nav-item is-active" data-view="spaces" id="nav-spaces">
+          <span>资料空间</span>
+          <span class="nav-count" id="nav-spaces-count">0</span>
+        </button>
+        <button class="nav-item" data-view="connections" id="nav-connections">
+          <span>AI 连接</span>
+          <span class="status-pill is-ok" id="nav-agy-badge">检测中</span>
+        </button>
+      </nav>
+
+      <div class="section-head">
+        <span>我的资料空间</span>
+        <button class="text-btn" id="btn-new-space" type="button">+ 新建</button>
+      </div>
+      <div class="space-list" id="space-list" role="list"></div>
+
+      <div class="sidebar-footer">
+        <div class="service-indicator" id="service-indicator">
+          <span class="dot is-ok" id="service-dot"></span>
+          <span id="service-label">本地服务检测中…</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-area" id="main-area">
+      <!-- Spaces View -->
+      <section id="view-spaces" class="view-panel">
+        <header class="panel-header">
+          <div class="space-heading">
+            <div class="title-row">
+              <h1 id="active-space-name">尚未创建资料空间</h1>
+              <span class="alias-badge" id="active-space-aliases" hidden></span>
+              <button class="ghost-btn sm" id="btn-edit-space" type="button" hidden>编辑空间</button>
+            </div>
+            <div class="meta-line" id="active-space-meta">将本机文件夹、表格与文档登记一次，原件保留在原位置供 AI 按需读取</div>
+          </div>
+          <div class="header-actions">
+            <button class="secondary-btn" id="btn-refresh-sources" type="button">检查更新</button>
+            <button class="primary-btn" id="btn-add-source" type="button">+ 添加引用</button>
+          </div>
+        </header>
+
+        <div class="toolbar-card">
+          <input type="search" id="search-input" class="search-input" placeholder="搜索文件名、文件夹或本机路径…" aria-label="搜索当前空间引用" />
+          <div class="filter-pills" id="type-filters" role="tablist" aria-label="按类型筛选">
+            <button class="pill is-active" data-type="all" type="button">全部</button>
+            <button class="pill" data-type="folder" type="button">文件夹</button>
+            <button class="pill" data-type="table" type="button">表格</button>
+            <button class="pill" data-type="doc" type="button">文档</button>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-scroll">
+            <table class="ref-table" id="sources-table">
+              <thead>
+                <tr>
+                  <th class="col-text">名称</th>
+                  <th class="col-text">类型</th>
+                  <th class="col-num">内容规模</th>
+                  <th class="col-text">本机原路径</th>
+                  <th class="col-text">读取状态</th>
+                  <th class="col-text">最近检查</th>
+                  <th class="col-act">操作</th>
+                </tr>
+              </thead>
+              <tbody id="sources-tbody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="empty-state" hidden>
+            <div class="empty-title" id="empty-title">当前没有已关联的本机资料</div>
+            <div class="empty-desc" id="empty-desc">点击右上角「+ 添加引用」选择本机文件夹或文件，原件将保留在原路径。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI Connections View -->
+      <section id="view-connections" class="view-panel" hidden>
+        <header class="panel-header">
+          <div class="space-heading">
+            <div class="title-row">
+              <h1>AI 工作台连接与会话隔离</h1>
+            </div>
+            <div class="meta-line">本地服务运行、文件可读性与各工作台连接状态分别独立检测</div>
+          </div>
+          <div class="header-actions">
+            <button class="secondary-btn" id="btn-refresh-health" type="button">重新检测</button>
+          </div>
+        </header>
+
+        <div class="conn-grid" id="conn-grid"></div>
+
+        <div class="sub-card">
+          <div class="sub-card-head">
+            <h2>活跃会话引用范围（按宿主 Conversation ID 独立保存）</h2>
+          </div>
+          <div id="sessions-table-wrap"></div>
+        </div>
+
+        <div class="sub-card">
+          <div class="sub-card-head">
+            <h2>最近按需读取依据记录</h2>
+          </div>
+          <div id="provenance-list-wrap"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- On-demand Right Detail Drawer -->
+    <aside class="detail-drawer" id="detail-drawer" hidden>
+      <div class="drawer-head">
+        <span class="drawer-title">引用详情与会话状态</span>
+        <button class="icon-btn" id="btn-close-drawer" type="button" aria-label="关闭详情">✕</button>
+      </div>
+      <div class="drawer-body" id="drawer-body"></div>
+    </aside>
+  </div>
+
+  <!-- Space Create/Edit Dialog -->
+  <dialog class="modal-sm" id="space-dialog">
+    <form id="space-form" method="dialog">
+      <div class="modal-head">
+        <h2 id="space-dialog-title">新建资料空间</h2>
+        <button class="icon-btn" type="button" data-close="space-dialog">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="space-form-id" />
+        <label class="field-label">空间名称
+          <input type="text" id="space-form-name" class="text-input" placeholder="例如：运营资料" required />
+        </label>
+        <label class="field-label">调用简称（多个用逗号分隔，改名不影响已有会话）
+          <input type="text" id="space-form-aliases" class="text-input" placeholder="例如：杭州仓, 华东仓" />
+        </label>
+        <label class="field-label" id="space-initial-path-wrap">初始关联路径（可选，可点击右侧调用访达选择）
+          <div class="input-row">
+            <input type="text" id="space-form-path" class="text-input" placeholder="/Work/杭州仓/" />
+            <button class="secondary-btn" type="button" data-pick="folder" data-target="space-form-path">选文件夹</button>
+          </div>
+        </label>
+      </div>
+      <div class="modal-foot">
+        <button class="danger-btn" type="button" id="btn-delete-space" hidden>删除空间</button>
+        <div class="foot-right">
+          <button class="secondary-btn" type="button" data-close="space-dialog">取消</button>
+          <button class="primary-btn" type="submit">保存</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Add / Relink Source Dialog -->
+  <dialog class="modal-sm" id="source-dialog">
+    <form id="source-form" method="dialog">
+      <div class="modal-head">
+        <h2 id="source-dialog-title">添加本机引用</h2>
+        <button class="icon-btn" type="button" data-close="source-dialog">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="source-form-mode" value="add" />
+        <input type="hidden" id="source-form-id" value="" />
+        <label class="field-label">本机文件夹或文件路径（只读引用，不复制原件）
+          <input type="text" id="source-form-path" class="text-input" placeholder="/Users/... 或点击下方按钮选择" required />
+        </label>
+        <div class="picker-row">
+          <button class="secondary-btn" type="button" data-pick="folder" data-target="source-form-path">从访达选择文件夹</button>
+          <button class="secondary-btn" type="button" data-pick="file" data-target="source-form-path">从访达选择文件</button>
+        </div>
+        <div class="form-error" id="source-form-error" hidden></div>
+      </div>
+      <div class="modal-foot">
+        <div></div>
+        <div class="foot-right">
+          <button class="secondary-btn" type="button" data-close="source-dialog">取消</button>
+          <button class="primary-btn" type="submit">确认关联</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Near-fullscreen Structure Inspection Modal (16px margin on desktop) -->
+  <dialog class="modal-full" id="inspect-dialog">
+    <div class="modal-head">
+      <h2 id="inspect-dialog-title">已识别结构详情</h2>
+      <button class="icon-btn" type="button" data-close="inspect-dialog">✕</button>
+    </div>
+    <div class="modal-scroll" id="inspect-dialog-body"></div>
+    <div class="modal-foot">
+      <div class="meta-line" id="inspect-dialog-meta"></div>
+      <button class="primary-btn" type="button" data-close="inspect-dialog">关闭</button>
+    </div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

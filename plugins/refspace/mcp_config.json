@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "refspace": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "exec python3 \"${PLUGIN_ROOT:-.}/run_mcp.py\""
+      ]
+    }
+  }
+}

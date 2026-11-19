@@ -113,9 +113,7 @@ Notes above reflect repository and documentation review; licenses, maintenance s
 
 ## Development status
 
-RefSpace is currently in **0.1 preparation**. Product rules, open-source review, and first-platform integration design are documented; the local service, management UI, and desktop installer have not yet been implemented or end-to-end tested.
-
-Development follows a verification-first order—proving live AI tool calls and session isolation before building out the full client and installer:
+RefSpace is in **0.1 internal development**. The Python stdlib local core, Antigravity plugin bundle (`MCP + Hooks + Rules`), multi-format dual-track engine, and compact HTML management console are implemented and verified by automated checks; live two-window pilot runs on real user workbooks and Electron desktop packaging remain in upcoming acceptance stages.
 
 ```mermaid
 flowchart TD
@@ -131,14 +129,38 @@ flowchart TD
     H --> I["Stage 6: Electron desktop packaging & additional platforms"]
 ```
 
-| Stage & scope | Current status & acceptance gate |
+| Stage & scope | What you can verify today |
 | --- | --- |
-| 1. First workbench validation | Pending implementation. Verify host-supplied `conversationId` isolation and automatic one-shot rollback in Antigravity via `Plugin + MCP + Hooks` across two concurrent windows. |
-| 2. Space registry & read-only sandbox | Pending implementation. Persist stable Space IDs, aliases, multi-path sources, `realpath` allowlists, and re-linking across restarts without copying or mutating source files. |
-| 3. Session-sticky state machine | Pending implementation. Cover all seven scope transitions, ambiguity rollback, and prompt-injection isolation from file contents. |
-| 4. Multi-format & spreadsheet engine | Pending implementation. Verify `.md`/`.txt`/`.docx`/`.pdf` passage extraction and `.xlsx`/`.xlsm`/`.csv` merged-cell, leading-zero, and aggregation accuracy against source files. |
-| 5. Compact HTML management UI | Pending implementation. Deliver a calm light-mode console with Space list, source list, and live health checks for local service, file readability, and workbench connection. |
-| 6. Desktop packaging & expansion | Pending implementation. Package with Electron, define window-close vs. background tray lifecycle, and validate additional AI workbenches individually. |
+| 1. First workbench validation | [Antigravity plugin bundle](plugins/refspace/) (`Stdio / HTTP MCP` + `PreInvocation / PreToolUse / Stop` hooks) implemented. Automated tests verify host `conversationId` enforcement, two-window isolation, and automatic `once` rollback; interactive pilot runs are next. |
+| 2. Space registry & read-only sandbox | SQLite WAL registry and `realpath` read-only sandbox implemented. Verified stable IDs across renames, symlink escape blocking, `needs_relink` detection, and path relinking. |
+| 3. Session-sticky state machine | All seven scope transitions implemented and tested, including ambiguity/unreadable rollback and prompt-injection isolation from file text. |
+| 4. Multi-format & spreadsheet engine | `.md`/`.txt`/`.docx`/`.pdf`/`.json` passage extraction and `.xlsx`/`.xlsm`/`.csv` sparse parsing implemented (skipping million-row ghosts, separating side-by-side regions, expanding merged cells, preserving leading zeros/`0`/`false`, flagging uncached formulas, deduplicated aggregation, and live reload after edits). |
+| 5. Compact HTML management UI | Light-mode management console (`src/refspace/ui/`) implemented with Space management, native macOS Finder pickers, on-demand structure drawer, and independent live health checks. |
+| 6. Desktop packaging & expansion | Pending. Package with Electron for double-click startup and validate additional AI workbenches individually. |
+
+## Developer quick start
+
+RefSpace uses only the **Python 3.9+ standard library** (`sqlite3`, `zipfile`, `xml.etree`, `http.server`) with zero third-party `npm` or `pip` packages required.
+
+Run syntax compilation and the full automated verification suite from the repository root:
+
+```sh
+bash scripts/check.sh
+```
+
+To try the local management console and demo Spaces with generated fictional files (stored under Git-ignored `.refspace/`):
+
+```sh
+# 1. Generate fictional multi-format fixtures (.xlsx / .docx / .pdf / .md / .csv) and seed demo Spaces
+PYTHONPATH=src REFSPACE_DB_PATH=.refspace/demo.db python3 -m refspace seed-demo
+
+# 2. Start the local management UI (http://127.0.0.1:17890, also serving Streamable HTTP /mcp)
+PYTHONPATH=src REFSPACE_DB_PATH=.refspace/demo.db python3 -m refspace serve
+```
+
+Opening this repository in Antigravity discovers `plugins/refspace` automatically via `.agents/plugins.json`. To install the plugin globally across all workspaces on your machine, run `PYTHONPATH=src python3 -m refspace install-plugin`.
+
+[Automated checks](.github/workflows/check.yml) · [Plugin manifest](plugins/refspace/plugin.json) · [Session rules](plugins/refspace/rules/AGENTS.md) · [Verification suite](tests/run_all_tests.py)
 
 ## Data, privacy, and integration boundaries
 
