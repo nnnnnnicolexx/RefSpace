@@ -1,0 +1,37 @@
+# macOS / OS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Local RefSpace runtime state & private path registries (never commit user paths/data)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.refspace/
+data/local/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Electron
+node_modules/
+dist/
+out/
+release/
+npm-debug.log*
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Temporary test outputs
+tmp/
+.tmp/
