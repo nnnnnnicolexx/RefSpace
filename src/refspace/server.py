@@ -21,6 +21,51 @@ UI_DIR = Path(__file__).resolve().parent / "ui"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+def _compute_stage(config_found: bool, ev: dict, has_sessions: bool) -> tuple[str, str, dict]:
+    connection_verified = config_found and bool(ev["last_handshake_at"] or ev["last_tool_call_at"] or has_sessions)
+    read_succeeded = connection_verified and bool(ev["last_read_at"])
+    if read_succeeded:
+        stage, label = "read_succeeded", "读取成功"
+    elif connection_verified:
+        stage, label = "connection_verified", "连接已验证"
+    elif config_found:
+        stage, label = "config_found", "配置已发现"
+    else:
+        stage, label = "unconfigured", "未配置"
+    return stage, label, {
+        "config_found": config_found,
+        "connection_verified": connection_verified,
+        "read_succeeded": read_succeeded,
+    }
+
+
+def check_workbuddy_integration(registry: RefSpaceRegistry, session_mgr: SessionScopeManager) -> dict:
+    wb_cfg = Path.home() / ".workbuddy" / "mcp.json"
+    config_found = False
+    if wb_cfg.is_file():
+        try:
+            data = json.loads(wb_cfg.read_text(encoding="utf-8"))
+            servers = data.get("mcpServers") or {}
+            config_found = "refspace" in servers and not bool((servers.get("refspace") or {}).get("disabled", False))
+        except Exception:
+            config_found = False
+
+    ev = registry.get_workbench_events("workbuddy")
+    wb_sessions = [s for s in session_mgr.list_active_sessions() if s["workbench"] == "workbuddy"]
+    stage, stage_label, steps = _compute_stage(config_found, ev, bool(wb_sessions))
+    return {
+        "workbench": "WorkBuddy",
+        "config_path": str(wb_cfg),
+        "connected": config_found,
+        "stage": stage,
+        "stage_label": stage_label,
+        "steps": steps,
+        "last_handshake_at": ev["last_handshake_at"],
+        "last_read_at": ev["last_read_at"],
+        "last_read_summary": ev["last_read_summary"],
+    }
+
+
 def check_antigravity_integration(registry: RefSpaceRegistry, session_mgr: SessionScopeManager) -> dict:
     workspace_plugin = REPO_ROOT / "plugins" / "refspace" / "plugin.json"
     workspace_manifest = REPO_ROOT / ".agents" / "plugins.json"
@@ -33,33 +78,15 @@ def check_antigravity_integration(registry: RefSpaceRegistry, session_mgr: Sessi
 
     ev = registry.get_workbench_events("antigravity")
     active_sessions = session_mgr.list_active_sessions()
-
-    connection_verified = config_found and bool(ev["last_handshake_at"] or ev["last_tool_call_at"] or active_sessions)
-    read_succeeded = connection_verified and bool(ev["last_read_at"])
-
-    if read_succeeded:
-        stage = "read_succeeded"
-        stage_label = "读取成功"
-    elif connection_verified:
-        stage = "connection_verified"
-        stage_label = "连接已验证"
-    elif config_found:
-        stage = "config_found"
-        stage_label = "配置已发现"
-    else:
-        stage = "unconfigured"
-        stage_label = "未配置"
+    agy_sessions = [s for s in active_sessions if s["workbench"] == "antigravity"]
+    stage, stage_label, steps = _compute_stage(config_found, ev, bool(agy_sessions))
 
     return {
         "workbench": "Antigravity",
         "connected": config_found,
         "stage": stage,
         "stage_label": stage_label,
-        "steps": {
-            "config_found": config_found,
-            "connection_verified": connection_verified,
-            "read_succeeded": read_succeeded,
-        },
+        "steps": steps,
         "last_handshake_at": ev["last_handshake_at"],
         "last_tool_call_at": ev["last_tool_call_at"],
         "last_read_at": ev["last_read_at"],
@@ -70,10 +97,16 @@ def check_antigravity_integration(registry: RefSpaceRegistry, session_mgr: Sessi
         "hooks_isolation_enabled": (REPO_ROOT / "plugins" / "refspace" / "hooks.json").is_file() or (global_plugin.parent / "hooks.json").is_file(),
         "active_session_count": len(active_sessions),
         "active_sessions": active_sessions,
+        "workbuddy": check_workbuddy_integration(registry, session_mgr),
+        "runtime_paths": {
+            "python_bin": sys.executable,
+            "mcp_entry_path": str(REPO_ROOT / "plugins" / "refspace" / "run_mcp.py"),
+            "repo_root": str(REPO_ROOT),
+        },
         "data_boundary_note": "原文件始终留在本机原位置只读访问；AI 回答问题时，按需提取的片段或统计结果会交给所连接的模型服务处理。",
         "candidate_platforms": [
-            {"name": "Claude Desktop / Cursor / Codex", "status": "可通过本地 Stdio / HTTP MCP 接入（待逐端验证会话隔离与读取）"},
-            {"name": "豆包 / 千问等网页工作台", "status": "尚未适配（网页端不支持直连本机服务，需后续扩展桥接）"},
+            {"name": "Claude Desktop / Cursor / Codex", "status": "支持复制「通用一键接入提示词」发给对应客户端自动写入本地 MCP 配置"},
+            {"name": "豆包 / 千问等纯网页端", "status": "尚未适配（纯浏览器网页无法直接拉起本机脚本，需后续扩展桥接）"},
         ],
     }
 

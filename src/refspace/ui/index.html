@@ -28,6 +28,10 @@
           <span>AI 连接</span>
           <span class="status-pill is-info" id="nav-agy-badge">检测中</span>
         </button>
+        <button class="nav-item" data-view="guide" id="nav-guide" type="button">
+          <span>使用教程</span>
+          <span class="nav-count">一键复制</span>
+        </button>
       </nav>
 
       <div class="section-head">
@@ -134,6 +138,22 @@
           </div>
           <div id="provenance-list-wrap"></div>
         </div>
+      </section>
+
+      <!-- Interactive Tutorial & Foolproof Prompts View -->
+      <section id="view-guide" class="view-panel" hidden>
+        <header class="panel-header">
+          <div class="space-heading">
+            <div class="title-row">
+              <h1>傻瓜式使用与接入教程</h1>
+            </div>
+            <div class="meta-line">不用手动改配置文件：把下方提示词整段复制发给对应的 AI 工作台，让它自己配好后直接喊名字调用</div>
+          </div>
+          <div class="header-actions">
+            <button class="primary-btn" id="btn-guide-new-space" type="button">+ 新建资料空间</button>
+          </div>
+        </header>
+        <div id="guide-content"></div>
       </section>
     </main>
 
