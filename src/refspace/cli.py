@@ -38,16 +38,24 @@ def seed_demo_spaces(db_path: str | None = None) -> dict:
     reg = RefSpaceRegistry(db_path=db_path)
 
     created = []
-    for name, aliases, src_path in [
-        ("运营资料", ["杭州仓"], paths["hangzhou_dir"]),
-        ("客户合同库", ["合同库"], paths["contract_dir"]),
-        ("库存资料", ["库存表"], paths["inventory_dir"]),
+    hz_sources = [
+        paths["hangzhou_dir"],
+        str(Path(paths["hangzhou_dir"]) / "11月出库与库存明细.xlsx"),
+        str(Path(paths["hangzhou_dir"]) / "仓储结算与赔付规则.docx"),
+        str(Path(paths["hangzhou_dir"]) / "补货判断规则.md"),
+    ]
+    for name, aliases, src_list in [
+        ("运营资料", ["杭州仓"], hz_sources),
+        ("客户合同库", ["合同库"], [paths["contract_dir"], str(Path(paths["contract_dir"]) / "供应商框架协议_示例.pdf")]),
+        ("库存资料", ["库存表"], [paths["inventory_dir"], str(Path(paths["inventory_dir"]) / "实时库存快照.csv")]),
     ]:
         try:
-            sp = reg.create_space(name=name, aliases=aliases, source_paths=[src_path])
+            sp = reg.create_space(name=name, aliases=aliases, source_paths=src_list)
             created.append(sp["name"])
         except RegistryError:
-            pass
+            existing = reg.resolve_space_query(name)
+            for p in src_list:
+                reg.add_source_to_space(existing["space_id"], p)
     return {"demo_files_dir": str(demo_root), "seeded_spaces": created, "db_path": reg.db_path}
 
 

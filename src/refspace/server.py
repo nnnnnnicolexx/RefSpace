@@ -7,13 +7,14 @@ import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
 from .engines.router import RefSpaceRouter
 from .mcp_server import RefSpaceMCPDispatcher
-from .registry import RefSpaceRegistry, RegistryError
+from .registry import RefSpaceRegistry, RegistryError, now_iso
+from .sandbox import classify_extension, is_ignored_entry
 from .session import SessionScopeManager
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
@@ -54,6 +55,7 @@ def build_health_report(registry: RefSpaceRegistry, session_mgr: SessionScopeMan
 
     return {
         "ok": True,
+        "checked_at": now_iso(),
         "version": __version__,
         "service": {
             "running": db_ok,
@@ -70,28 +72,87 @@ def build_health_report(registry: RefSpaceRegistry, session_mgr: SessionScopeMan
     }
 
 
-def _macos_pick_path(pick_kind: str) -> Optional[str]:
+def _macos_pick_path(pick_kind: str) -> dict:
     if sys.platform != "darwin":
-        return None
-    if pick_kind == "folder":
-        script = 'POSIX path of (choose folder with prompt "选择要关联到引知 RefSpace 的文件夹（原件保持不动，只读引用）：")'
-    else:
-        script = 'POSIX path of (choose file with prompt "选择要关联到引知 RefSpace 的文件（原件保持不动，只读引用）：")'
+        return {"ok": False, "error_code": "PICKER_UNAVAILABLE", "message": "当前系统不支持访达弹窗，请使用下方目录浏览或直接输入路径"}
+
+    prompt_txt = (
+        "选择要关联到引知 RefSpace 的文件夹（原件保持不动，只读引用）："
+        if pick_kind == "folder"
+        else "选择要关联到引知 RefSpace 的文件（原件保持不动，只读引用）："
+    )
+    choose_cmd = f'choose folder with prompt "{prompt_txt}"' if pick_kind == "folder" else f'choose file with prompt "{prompt_txt}"'
+    script = f'tell application "SystemUIServer"\nactivate\nPOSIX path of ({choose_cmd})\nend tell'
     proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-    if proc.returncode != 0:
-        return None
-    val = proc.stdout.strip()
-    return val or None
+    if proc.returncode == 0:
+        val = proc.stdout.strip()
+        return {"ok": True, "picked": val or None, "canceled": not bool(val)}
+
+    stderr = (proc.stderr or "").strip()
+    if "-128" in stderr or "User canceled" in stderr or "用户已取消" in stderr:
+        return {"ok": True, "picked": None, "canceled": True}
+
+    return {
+        "ok": False,
+        "error_code": "PICKER_UNAVAILABLE",
+        "message": "当前服务运行在受限沙箱中，无法拉起系统访达弹窗；已为你展开页面内目录选择器。",
+    }
 
 
-def _reveal_in_finder(path: str) -> bool:
+def _reveal_in_finder(path: str) -> dict:
     expanded = os.path.abspath(os.path.expanduser(path))
     if not os.path.exists(expanded):
-        return False
+        return {"ok": False, "message": f"原路径不存在，请先重新关联：{expanded}"}
     if sys.platform == "darwin":
-        subprocess.run(["open", "-R", expanded], check=False)
-        return True
-    return False
+        proc = subprocess.run(["open", "-R", expanded], capture_output=True, text=True)
+        if proc.returncode == 0:
+            return {"ok": True, "path": expanded, "message": f"已在访达中定位：{Path(expanded).name}"}
+        return {
+            "ok": False,
+            "error_code": "REVEAL_BLOCKED",
+            "path": expanded,
+            "message": f"当前受限环境无法自动拉起访达窗口，原文件本机路径为：{expanded}",
+        }
+    return {"ok": False, "path": expanded, "message": f"原文件本机路径：{expanded}"}
+
+
+def _browse_local_directory(raw_dir: Optional[str]) -> dict:
+    start = os.path.abspath(os.path.expanduser((raw_dir or "").strip() or str(Path.home())))
+    if os.path.isfile(start):
+        start = os.path.dirname(start)
+    if not os.path.isdir(start):
+        start = str(Path.home())
+    if not os.access(start, os.R_OK):
+        raise RegistryError("DIR_UNREADABLE", f"无权限读取目录：{start}")
+
+    parent = str(Path(start).parent) if Path(start).parent != Path(start) else None
+    entries: List[dict] = []
+    try:
+        names = sorted(os.listdir(start))
+    except OSError as exc:
+        raise RegistryError("DIR_UNREADABLE", f"无法列出目录（{exc}）：{start}")
+
+    for name in names:
+        if is_ignored_entry(name):
+            continue
+        full = os.path.join(start, name)
+        if os.path.isdir(full):
+            entries.append({"name": name + "/", "path": full, "kind": "folder", "selectable": True})
+        elif os.path.isfile(full):
+            cat = classify_extension(full)
+            if cat is not None:
+                entries.append({"name": name, "path": full, "kind": "file", "category": cat, "selectable": True})
+
+    entries.sort(key=lambda x: (0 if x["kind"] == "folder" else 1, x["name"].lower()))
+    shortcuts = [
+        {"label": "当前项目目录", "path": str(REPO_ROOT)},
+        {"label": "演示样例目录", "path": str(REPO_ROOT / ".refspace" / "demo-files")},
+        {"label": "个人主目录 (~)", "path": str(Path.home())},
+        {"label": "下载 (Downloads)", "path": str(Path.home() / "Downloads")},
+        {"label": "文稿 (Documents)", "path": str(Path.home() / "Documents")},
+    ]
+    shortcuts = [s for s in shortcuts if os.path.isdir(s["path"]) and os.access(s["path"], os.R_OK)]
+    return {"ok": True, "current_dir": start, "parent_dir": parent, "shortcuts": shortcuts, "entries": entries[:200]}
 
 
 def create_http_server(host: str = "127.0.0.1", port: int = 17890, db_path: Optional[str] = None) -> ThreadingHTTPServer:
@@ -145,8 +206,11 @@ def create_http_server(host: str = "127.0.0.1", port: int = 17890, db_path: Opti
                     src_id = (qs.get("source_id") or [""])[0]
                     self._send_json({"ok": True, **router.inspect_single_source_preview(src_id)})
                     return
+                if route == "/api/system/browse-dir":
+                    raw_d = (qs.get("dir") or [""])[0]
+                    self._send_json(_browse_local_directory(raw_d))
+                    return
 
-                # Serve static UI files
                 rel = "index.html" if route in ("/", "") else route.lstrip("/")
                 target_file = (UI_DIR / rel).resolve()
                 if not str(target_file).startswith(str(UI_DIR.resolve())) or not target_file.is_file():
@@ -155,8 +219,12 @@ def create_http_server(host: str = "127.0.0.1", port: int = 17890, db_path: Opti
                 ctype, _ = mimetypes.guess_type(str(target_file))
                 raw = target_file.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", (ctype or "application/octet-stream") + ("; charset=utf-8" if str(target_file).endswith((".html", ".css", ".js")) else ""))
+                self.send_header(
+                    "Content-Type",
+                    (ctype or "application/octet-stream") + ("; charset=utf-8" if str(target_file).endswith((".html", ".css", ".js")) else ""),
+                )
                 self.send_header("Content-Length", str(len(raw)))
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(raw)
             except RegistryError as exc:
@@ -169,7 +237,6 @@ def create_http_server(host: str = "127.0.0.1", port: int = 17890, db_path: Opti
             try:
                 body = self._read_json()
 
-                # Streamable HTTP MCP endpoint (/mcp)
                 if route == "/mcp":
                     hdr_sid = self.headers.get("Mcp-Session-Id") or self.headers.get("X-RefSpace-Session-Id")
                     if hdr_sid and isinstance(body.get("params"), dict) and isinstance(body["params"].get("arguments"), dict):
@@ -226,17 +293,17 @@ def create_http_server(host: str = "127.0.0.1", port: int = 17890, db_path: Opti
                     sid = body.get("space_id") or None
                     ack = bool(body.get("acknowledge_updates", False))
                     sources = registry.refresh_sources(space_id=sid, acknowledge_updates=ack)
-                    self._send_json({"ok": True, "sources": sources})
+                    self._send_json({"ok": True, "sources": sources, "checked_at": now_iso()})
                     return
 
                 if route == "/api/system/pick-path":
-                    picked = _macos_pick_path(str(body.get("kind") or "folder"))
-                    self._send_json({"ok": True, "picked": picked})
+                    res = _macos_pick_path(str(body.get("kind") or "folder"))
+                    self._send_json(res, status=200)
                     return
 
                 if route == "/api/system/reveal":
-                    ok = _reveal_in_finder(str(body.get("path") or ""))
-                    self._send_json({"ok": ok})
+                    res = _reveal_in_finder(str(body.get("path") or ""))
+                    self._send_json(res, status=200)
                     return
 
                 self._send_json({"ok": False, "message": f"Unknown endpoint: {route}"}, status=404)

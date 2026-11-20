@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <div class="brand">
@@ -18,11 +20,11 @@
       </div>
 
       <nav class="primary-nav" aria-label="主导航">
-        <button class="nav-item is-active" data-view="spaces" id="nav-spaces">
+        <button class="nav-item is-active" data-view="spaces" id="nav-spaces" type="button">
           <span>资料空间</span>
           <span class="nav-count" id="nav-spaces-count">0</span>
         </button>
-        <button class="nav-item" data-view="connections" id="nav-connections">
+        <button class="nav-item" data-view="connections" id="nav-connections" type="button">
           <span>AI 连接</span>
           <span class="status-pill is-ok" id="nav-agy-badge">检测中</span>
         </button>
@@ -61,7 +63,10 @@
         </header>
 
         <div class="toolbar-card">
-          <input type="search" id="search-input" class="search-input" placeholder="搜索文件名、文件夹或本机路径…" aria-label="搜索当前空间引用" />
+          <div class="search-wrap">
+            <input type="search" id="search-input" class="search-input" placeholder="搜索文件名、文件夹或本机路径…" aria-label="搜索当前空间引用" />
+            <button class="text-btn" id="btn-clear-search" type="button" hidden>清除</button>
+          </div>
           <div class="filter-pills" id="type-filters" role="tablist" aria-label="按类型筛选">
             <button class="pill is-active" data-type="all" type="button">全部</button>
             <button class="pill" data-type="folder" type="button">文件夹</button>
@@ -71,11 +76,11 @@
         </div>
 
         <div class="table-card">
-          <div class="table-scroll">
+          <div class="table-scroll" id="sources-table-wrap">
             <table class="ref-table" id="sources-table">
               <thead>
                 <tr>
-                  <th class="col-text">名称</th>
+                  <th class="col-text is-sticky">名称</th>
                   <th class="col-text">类型</th>
                   <th class="col-num">内容规模</th>
                   <th class="col-text">本机原路径</th>
@@ -90,6 +95,9 @@
           <div class="empty-state" id="empty-state" hidden>
             <div class="empty-title" id="empty-title">当前没有已关联的本机资料</div>
             <div class="empty-desc" id="empty-desc">点击右上角「+ 添加引用」选择本机文件夹或文件，原件将保留在原路径。</div>
+            <div style="margin-top:12px;">
+              <button class="secondary-btn" id="btn-reset-filters" type="button" hidden>重置筛选条件</button>
+            </div>
           </div>
         </div>
       </section>
@@ -101,7 +109,7 @@
             <div class="title-row">
               <h1>AI 工作台连接与会话隔离</h1>
             </div>
-            <div class="meta-line">本地服务运行、文件可读性与各工作台连接状态分别独立检测</div>
+            <div class="meta-line" id="conn-checked-meta">本地服务运行、文件可读性与各工作台连接状态分别独立检测</div>
           </div>
           <div class="header-actions">
             <button class="secondary-btn" id="btn-refresh-health" type="button">重新检测</button>
@@ -138,31 +146,36 @@
 
   <!-- Space Create/Edit Dialog -->
   <dialog class="modal-sm" id="space-dialog">
-    <form id="space-form" method="dialog">
+    <form id="space-form" novalidate>
       <div class="modal-head">
         <h2 id="space-dialog-title">新建资料空间</h2>
-        <button class="icon-btn" type="button" data-close="space-dialog">✕</button>
+        <button class="icon-btn" type="button" data-close="space-dialog" aria-label="关闭弹窗">✕</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="space-form-id" />
         <label class="field-label">空间名称
-          <input type="text" id="space-form-name" class="text-input" placeholder="例如：运营资料" required />
+          <input type="text" id="space-form-name" class="text-input" placeholder="例如：运营资料" />
         </label>
         <label class="field-label">调用简称（多个用逗号分隔，改名不影响已有会话）
           <input type="text" id="space-form-aliases" class="text-input" placeholder="例如：杭州仓, 华东仓" />
         </label>
-        <label class="field-label" id="space-initial-path-wrap">初始关联路径（可选，可点击右侧调用访达选择）
-          <div class="input-row">
+        <div id="space-initial-path-wrap">
+          <label class="field-label">初始关联路径（可选，留空也可先创建空间）
             <input type="text" id="space-form-path" class="text-input" placeholder="/Work/杭州仓/" />
-            <button class="secondary-btn" type="button" data-pick="folder" data-target="space-form-path">选文件夹</button>
+          </label>
+          <div class="picker-row" style="margin-top:8px;">
+            <button class="secondary-btn" type="button" data-pick="folder" data-target="space-form-path">从访达选文件夹</button>
+            <button class="secondary-btn" type="button" data-browse-toggle="space-browser" data-target="space-form-path">在页面内浏览目录</button>
           </div>
-        </label>
+          <div class="dir-browser" id="space-browser" hidden></div>
+        </div>
+        <div class="form-error" id="space-form-error" hidden></div>
       </div>
       <div class="modal-foot">
         <button class="danger-btn" type="button" id="btn-delete-space" hidden>删除空间</button>
         <div class="foot-right">
           <button class="secondary-btn" type="button" data-close="space-dialog">取消</button>
-          <button class="primary-btn" type="submit">保存</button>
+          <button class="primary-btn" type="submit" id="space-submit-btn">保存</button>
         </div>
       </div>
     </form>
@@ -170,38 +183,58 @@
 
   <!-- Add / Relink Source Dialog -->
   <dialog class="modal-sm" id="source-dialog">
-    <form id="source-form" method="dialog">
+    <form id="source-form" novalidate>
       <div class="modal-head">
         <h2 id="source-dialog-title">添加本机引用</h2>
-        <button class="icon-btn" type="button" data-close="source-dialog">✕</button>
+        <button class="icon-btn" type="button" data-close="source-dialog" aria-label="关闭弹窗">✕</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="source-form-mode" value="add" />
         <input type="hidden" id="source-form-id" value="" />
-        <label class="field-label">本机文件夹或文件路径（只读引用，不复制原件）
-          <input type="text" id="source-form-path" class="text-input" placeholder="/Users/... 或点击下方按钮选择" required />
+        <label class="field-label">本机文件夹或文件路径（只读引用，原件保持原处不动）
+          <input type="text" id="source-form-path" class="text-input" placeholder="输入本机路径，或使用下方两种选择器" />
         </label>
         <div class="picker-row">
           <button class="secondary-btn" type="button" data-pick="folder" data-target="source-form-path">从访达选择文件夹</button>
           <button class="secondary-btn" type="button" data-pick="file" data-target="source-form-path">从访达选择文件</button>
+          <button class="secondary-btn" type="button" data-browse-toggle="source-browser" data-target="source-form-path">页面内浏览选择</button>
         </div>
+        <div class="dir-browser" id="source-browser" hidden></div>
         <div class="form-error" id="source-form-error" hidden></div>
       </div>
       <div class="modal-foot">
         <div></div>
         <div class="foot-right">
           <button class="secondary-btn" type="button" data-close="source-dialog">取消</button>
-          <button class="primary-btn" type="submit">确认关联</button>
+          <button class="primary-btn" type="submit" id="source-submit-btn">确认关联</button>
         </div>
       </div>
     </form>
+  </dialog>
+
+  <!-- Confirmation Dialog for Destructive Actions -->
+  <dialog class="modal-xs" id="confirm-dialog">
+    <div class="modal-head">
+      <h2 id="confirm-title">确认操作</h2>
+      <button class="icon-btn" type="button" data-close="confirm-dialog" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="confirm-message" style="font-size:13px;color:var(--text);"></div>
+    </div>
+    <div class="modal-foot">
+      <div></div>
+      <div class="foot-right">
+        <button class="secondary-btn" type="button" data-close="confirm-dialog">取消</button>
+        <button class="danger-btn" type="button" id="confirm-ok-btn">确认执行</button>
+      </div>
+    </div>
   </dialog>
 
   <!-- Near-fullscreen Structure Inspection Modal (16px margin on desktop) -->
   <dialog class="modal-full" id="inspect-dialog">
     <div class="modal-head">
       <h2 id="inspect-dialog-title">已识别结构详情</h2>
-      <button class="icon-btn" type="button" data-close="inspect-dialog">✕</button>
+      <button class="icon-btn" type="button" data-close="inspect-dialog" aria-label="关闭结构详情">✕</button>
     </div>
     <div class="modal-scroll" id="inspect-dialog-body"></div>
     <div class="modal-foot">
