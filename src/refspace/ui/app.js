@@ -30,9 +30,25 @@
     const dotClass = type === "err" ? "is-err" : type === "warn" ? "is-warn" : "is-ok";
     item.innerHTML = `<span class="dot ${dotClass}"></span><span>${esc(message)}</span>`;
     box.appendChild(item);
-    setTimeout(() => {
-      item.remove();
-    }, 2800);
+    setTimeout(() => item.remove(), 2600);
+  }
+
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {}
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
   }
 
   function askConfirm(title, message, okLabel, onConfirm) {
@@ -56,22 +72,50 @@
   }
 
   function formatCategory(src) {
-    if (src.kind === "folder") return "文件夹";
-    if (src.category === "table") return `表格 (${(src.ext || "").replace(".", "").toUpperCase()})`;
-    if (src.category === "doc") return `文档 (${(src.ext || "").replace(".", "").toUpperCase()})`;
+    if (src.kind === "folder") return `文件夹 · ${src.item_count || 0} 项`;
+    const ext = (src.ext || "").replace(".", "").toUpperCase();
+    if (src.category === "table") return ext === "CSV" ? "CSV 表格" : `Excel 表格 (${ext})`;
+    if (src.category === "doc") {
+      if (ext === "DOCX") return "Word 文档";
+      if (ext === "MD") return "Markdown 文档";
+      if (ext === "PDF") return "PDF 文档";
+      return `文档 (${ext})`;
+    }
     return src.ext || "文件";
   }
 
   function formatScale(src) {
-    if (src.kind === "folder") return `${src.item_count || 0} 项支持文件`;
+    if (src.kind === "folder") return `${src.item_count || 0} 项受支持文件`;
     const kb = Math.max(1, Math.round((src.last_size || 0) / 1024));
     return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
   }
 
   function statusBadge(status) {
     if (status === "readable") return `<span class="status-pill is-ok"><span class="dot is-ok"></span>可读取</span>`;
-    if (status === "updated") return `<span class="status-pill is-info"><span class="dot" style="background:#2F5BCE"></span>有更新</span>`;
+    if (status === "updated") return `<span class="status-pill is-info"><span class="dot is-info"></span>有更新</span>`;
     return `<span class="status-pill is-warn"><span class="dot is-warn"></span>需重新关联</span>`;
+  }
+
+  function agyStagePill(agy) {
+    if (!agy || agy.stage === "unconfigured") return `<span class="status-pill is-warn">未配置</span>`;
+    if (agy.stage === "read_succeeded") return `<span class="status-pill is-ok">读取成功</span>`;
+    if (agy.stage === "connection_verified") return `<span class="status-pill is-info">连接已验证</span>`;
+    return `<span class="status-pill is-neutral">配置已发现</span>`;
+  }
+
+  function renderStepperHtml(agy) {
+    const s = agy?.steps || {};
+    const c1 = s.config_found ? "is-done" : "is-pending";
+    const c2 = s.connection_verified ? "is-done" : "is-pending";
+    const c3 = s.read_succeeded ? "is-done" : "is-pending";
+    return `
+      <div class="stepper-row">
+        <span class="step-chip ${c1}"><span class="dot ${s.config_found ? "is-ok" : "is-warn"}"></span>① 配置已发现</span>
+        <span class="step-arrow">→</span>
+        <span class="step-chip ${c2}"><span class="dot ${s.connection_verified ? "is-ok" : "is-info"}"></span>② 连接已验证</span>
+        <span class="step-arrow">→</span>
+        <span class="step-chip ${c3}"><span class="dot ${s.read_succeeded ? "is-ok" : "is-info"}"></span>③ 读取成功</span>
+      </div>`;
   }
 
   async function refreshAll() {
@@ -95,17 +139,23 @@
 
     const agy = state.health?.antigravity;
     const badge = $("nav-agy-badge");
-    if (agy?.connected) {
-      badge.className = "status-pill is-ok";
-      badge.textContent = "Antigravity 已就绪";
-    } else {
+    if (!agy || agy.stage === "unconfigured") {
       badge.className = "status-pill is-warn";
-      badge.textContent = "待接入";
+      badge.textContent = "未配置";
+    } else if (agy.stage === "read_succeeded") {
+      badge.className = "status-pill is-ok";
+      badge.textContent = "读取成功";
+    } else if (agy.stage === "connection_verified") {
+      badge.className = "status-pill is-info";
+      badge.textContent = "连接已验证";
+    } else {
+      badge.className = "status-pill is-neutral";
+      badge.textContent = "配置已发现";
     }
 
     const srvOk = state.health?.service?.running;
     $("service-dot").className = srvOk ? "dot is-ok" : "dot is-err";
-    $("service-label").textContent = srvOk ? "本地服务运行中 · 只读沙箱" : "本地存储异常";
+    $("service-label").textContent = srvOk ? "本地服务运行中 · 原件只读" : "本地存储异常";
 
     const listEl = $("space-list");
     if (!state.spaces.length) {
@@ -132,6 +182,7 @@
     const sp = state.spaces.find((s) => s.space_id === state.activeSpaceId) || null;
     $("btn-add-source").disabled = !sp;
     $("btn-refresh-sources").disabled = !sp;
+    $("btn-use-in-ai").hidden = !sp;
     $("btn-clear-search").hidden = !state.search;
 
     if (!sp) {
@@ -143,7 +194,7 @@
       $("sources-tbody").innerHTML = "";
       $("empty-state").hidden = false;
       $("empty-title").textContent = "还没有资料空间";
-      $("empty-desc").textContent = "建立空间并关联本机文件夹后，即可在 Antigravity 中直接说“引用空间名”。";
+      $("empty-desc").textContent = "建立空间并关联本机文件夹后，即可在 AI 工作台中直接按空间名称调用。";
       $("btn-reset-filters").hidden = true;
       return;
     }
@@ -156,7 +207,8 @@
       $("active-space-aliases").hidden = true;
     }
     $("btn-edit-space").hidden = false;
-    $("active-space-meta").textContent = `${sp.source_count} 个本机引用 · 空间编号 ${sp.space_id} · 原件保留在原路径`;
+    // Keep main header clean: no internal sp_xxx ID exposed here
+    $("active-space-meta").textContent = `${sp.source_count} 个本机引用 · 原件保留在原位置`;
 
     const allSources = sp.sources || [];
     const counts = {
@@ -194,23 +246,20 @@
 
     $("sources-table-wrap").hidden = false;
     $("empty-state").hidden = true;
+    // Clean 3-column focus: Name, Type, Status (+ quick relink only if broken, otherwise subtle detail link)
     $("sources-tbody").innerHTML = filtered
       .map((src) => {
         const selected = src.source_id === state.selectedSourceId ? "is-selected" : "";
-        const timeText = src.last_checked_at.slice(11, 19) || src.last_checked_at;
+        const rightCell =
+          src.status === "needs_relink"
+            ? `<button class="text-btn" type="button" data-action="relink" data-source-id="${esc(src.source_id)}" data-path="${esc(src.path)}">重新关联</button>`
+            : `<span class="text-btn is-muted">详情 →</span>`;
         return `
           <tr class="${selected}" data-source-id="${esc(src.source_id)}">
-            <td class="col-text is-sticky"><strong>${esc(src.name)}</strong></td>
+            <td class="col-text"><strong>${esc(src.name)}</strong></td>
             <td class="col-text">${esc(formatCategory(src))}</td>
-            <td class="col-num">${esc(formatScale(src))}</td>
-            <td class="col-text path-cell" title="${esc(src.path)}">${esc(src.path)}</td>
             <td class="col-text">${statusBadge(src.status)}</td>
-            <td class="col-text">${esc(timeText)}</td>
-            <td class="col-act">
-              <button class="text-btn" type="button" data-action="inspect" data-source-id="${esc(src.source_id)}">结构</button>
-              <button class="text-btn" type="button" data-action="relink" data-source-id="${esc(src.source_id)}" data-path="${esc(src.path)}">重关联</button>
-              <button class="text-btn is-danger" type="button" data-action="remove" data-source-id="${esc(src.source_id)}" data-name="${esc(src.name)}">移除</button>
-            </td>
+            <td class="col-act">${rightCell}</td>
           </tr>`;
       })
       .join("");
@@ -221,23 +270,28 @@
     if (!h) return;
     const agy = h.antigravity;
     const sh = h.sources_health;
-    $("conn-checked-meta").textContent = `本地服务运行、文件可读性与各工作台连接状态分别独立检测 · 最近检测：${h.checked_at || "刚刚"}`;
+    $("conn-checked-meta").textContent = `区分配置文件存在、本机握手连通与实际读取成功三个阶段 · 最近刷新：${h.checked_at || "刚刚"}`;
+    $("conn-boundary-bar").textContent = agy.data_boundary_note || "原文件留在本机原位置只读访问；AI 回答问题时，所需内容可能交给所连接的模型处理。";
+
     $("conn-grid").innerHTML = `
       <div class="conn-card">
         <div class="conn-card-top">
-          <span class="conn-name">本地引用与只读沙箱服务</span>
-          ${h.service.running ? '<span class="status-pill is-ok">运行中</span>' : '<span class="status-pill is-warn">异常</span>'}
+          <span class="conn-name">Antigravity（首发接入平台）</span>
+          ${agyStagePill(agy)}
         </div>
-        <div class="kv-row"><span class="kv-key">本地数据库</span><span class="kv-val">${esc(h.service.db_path)}</span></div>
-        <div class="kv-row"><span class="kv-key">来源可读状态</span><span class="kv-val">${sh.readable}/${sh.total} 可读 · ${sh.needs_relink} 需重关联</span></div>
+        ${renderStepperHtml(agy)}
+        <div class="kv-row"><span class="kv-key">配置范围</span><span class="kv-val">${esc(agy.scope)}</span></div>
+        <div class="kv-row"><span class="kv-key">最近连接验证</span><span class="kv-val">${esc(agy.last_handshake_at || "尚未执行握手验证")}</span></div>
+        <div class="kv-row"><span class="kv-key">最近成功读取</span><span class="kv-val">${esc(agy.last_read_at ? `${agy.last_read_at}${agy.last_read_summary ? `（${agy.last_read_summary}）` : ""}` : "暂无读取记录")}</span></div>
       </div>
       <div class="conn-card">
         <div class="conn-card-top">
-          <span class="conn-name">Antigravity（首发验证平台）</span>
-          ${agy.connected ? '<span class="status-pill is-ok">插件与 Hooks 已就绪</span>' : '<span class="status-pill is-warn">未检测到插件</span>'}
+          <span class="conn-name">本机引用与存储服务</span>
+          ${h.service.running ? '<span class="status-pill is-ok">运行中</span>' : '<span class="status-pill is-warn">异常</span>'}
         </div>
-        <div class="kv-row"><span class="kv-key">插件生效范围</span><span class="kv-val">${esc(agy.scope)}</span></div>
-        <div class="kv-row"><span class="kv-key">宿主会话物理隔离</span><span class="kv-val">${agy.hooks_isolation_enabled ? "已启用 (PreInvocation / PreToolUse / Stop)" : "未启用"}</span></div>
+        <div class="kv-row"><span class="kv-key">来源可读状态</span><span class="kv-val">${sh.readable}/${sh.total} 可读 · ${sh.needs_relink} 需重关联</span></div>
+        <div class="kv-row"><span class="kv-key">本地记录库</span><span class="kv-val">${esc(h.service.db_path)}</span></div>
+        <div class="meta-line" style="margin-top:8px;">仅保存路径引用、表头目录元信息与会话绑定，不另存整份文件副本。</div>
       </div>
       ${(agy.candidate_platforms || [])
         .map(
@@ -245,7 +299,7 @@
         <div class="conn-card">
           <div class="conn-card-top">
             <span class="conn-name">${esc(p.name)}</span>
-            <span class="status-pill is-warn">待适配验收</span>
+            <span class="status-pill is-neutral">待逐端验证</span>
           </div>
           <div class="meta-line">${esc(p.status)}</div>
         </div>`
@@ -255,10 +309,10 @@
 
     const sessWrap = $("sessions-table-wrap");
     if (!state.sessions.length) {
-      sessWrap.innerHTML = `<div class="meta-line">当前尚无已绑定资料空间的活跃会话。在 Antigravity 对话中说出“引用空间名”后将自动记录在此。</div>`;
+      sessWrap.innerHTML = `<div class="meta-line">当前尚无已绑定资料空间的活跃会话。在 Antigravity 对话中说出“引用空间名”后将自动按会话记录在此。</div>`;
     } else {
       sessWrap.innerHTML = `<div class="table-scroll"><table class="ref-table">
-        <thead><tr><th class="col-text">工作台</th><th class="col-text">会话标识 (Conversation ID)</th><th class="col-text">当前生效范围</th><th class="col-text">持久默认范围</th><th class="col-text">最近更新</th></tr></thead>
+        <thead><tr><th class="col-text">工作台</th><th class="col-text">会话标识</th><th class="col-text">当前生效范围</th><th class="col-text">持久默认范围</th><th class="col-text">最近更新</th></tr></thead>
         <tbody>${state.sessions
           .map(
             (s) => `<tr>
@@ -274,10 +328,10 @@
 
     const provWrap = $("provenance-list-wrap");
     if (!state.provenance.length) {
-      provWrap.innerHTML = `<div class="meta-line">暂无任务读取记录。</div>`;
+      provWrap.innerHTML = `<div class="meta-line">暂无实际读取记录；在 AI 对话中首次定位或读取空间资料后，时间与文件依据会显示在这里。</div>`;
     } else {
       provWrap.innerHTML = `<div class="table-scroll"><table class="ref-table">
-        <thead><tr><th class="col-text">时间</th><th class="col-text">会话</th><th class="col-text">调用工具</th><th class="col-text">来源依据</th></tr></thead>
+        <thead><tr><th class="col-text">读取时间</th><th class="col-text">会话</th><th class="col-text">操作</th><th class="col-text">读取依据</th></tr></thead>
         <tbody>${state.provenance
           .slice(0, 12)
           .map(
@@ -292,6 +346,72 @@
     }
   }
 
+  function openUseInAiModal() {
+    const sp = state.spaces.find((s) => s.space_id === state.activeSpaceId);
+    if (!sp) return;
+    const callName = sp.aliases?.[0] || sp.name;
+    const agy = state.health?.antigravity || {};
+    $("use-ai-title").textContent = `在 AI 中使用「${sp.name}」`;
+
+    const prompts = [
+      { label: "首次绑定并提问（后续追问自动沿用）", text: `引用${callName}，先帮我看看里面有哪些表格和文档` },
+      { label: "从其他资料切换到当前空间", text: `换成${callName}` },
+      { label: "仅当前这一次临时查询（问完恢复原默认）", text: `这次只用${callName}核对一下相关内容` },
+      { label: "保留原空间并叠加当前空间", text: `再加上${callName}` },
+    ];
+
+    $("use-ai-body").innerHTML = `
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <strong>当前 Antigravity 接入状态</strong>
+          <div style="display:flex;align-items:center;gap:8px;">
+            ${agyStagePill(agy)}
+            <button class="secondary-btn" style="height:26px;font-size:12px;padding:0 8px;" type="button" id="modal-verify-mcp-btn">验证连接</button>
+          </div>
+        </div>
+        ${renderStepperHtml(agy)}
+        <div class="meta-line">最近成功读取：${esc(agy.last_read_at ? `${agy.last_read_at}${agy.last_read_summary ? `（${agy.last_read_summary}）` : ""}` : "暂无读取记录，复制下方指令到对话发送即可验证")}</div>
+      </div>
+      <div>
+        <div style="font-weight:600;margin-bottom:6px;">直接在 Antigravity 对话框发送以下任一指令：</div>
+        <div class="prompt-list">
+          ${prompts
+            .map(
+              (p) => `
+            <div class="prompt-card">
+              <div>
+                <div class="prompt-label">${esc(p.label)}</div>
+                <div class="prompt-text">${esc(p.text)}</div>
+              </div>
+              <button class="secondary-btn" type="button" data-copy-prompt="${esc(p.text)}" style="flex-shrink:0;">复制</button>
+            </div>`
+            )
+            .join("")}
+        </div>
+      </div>
+    `;
+
+    $("modal-verify-mcp-btn")?.addEventListener("click", async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "验证中…";
+      try {
+        const res = await api("/api/antigravity/verify-mcp", {});
+        await refreshAll();
+        toast(`连接握手通过（已识别 ${res.tool_count} 个工具）`);
+        openUseInAiModal();
+      } catch (err) {
+        toast(err.message, "err");
+        btn.disabled = false;
+        btn.textContent = "验证连接";
+      }
+    });
+
+    if (!$("use-ai-dialog").open) {
+      $("use-ai-dialog").showModal();
+    }
+  }
+
   function promptRemoveSource(sourceId, sourceName) {
     if (!state.activeSpaceId) return;
     askConfirm(
@@ -302,7 +422,7 @@
         await api("/api/sources/remove", { space_id: state.activeSpaceId, source_id: sourceId });
         if (state.selectedSourceId === sourceId) {
           state.selectedSourceId = null;
-          $("detail-drawer").innerHTML && ($("drawer-body").innerHTML = "");
+          $("drawer-body").innerHTML = "";
         }
         await refreshAll();
         toast(`已从当前空间移除「${sourceName}」`);
@@ -313,38 +433,27 @@
   async function openSourceDrawer(sourceId) {
     state.selectedSourceId = sourceId;
     render();
-    $("drawer-body").innerHTML = `<div class="meta-line">正在按需读取结构摘要…</div>`;
+    $("drawer-body").innerHTML = `<div class="meta-line">正在读取引用详情…</div>`;
 
     try {
       const data = await api(`/api/source-preview?source_id=${encodeURIComponent(sourceId)}`);
       if (state.selectedSourceId !== sourceId) return;
       const src = data.source;
-      const sessionsHtml = state.sessions.length
-        ? state.sessions
-            .slice(0, 4)
-            .map(
-              (s) => `
-            <div class="session-card ${s.temp_active ? "is-once" : ""}">
-              <div class="session-id">会话 ${esc(s.session_id.slice(0, 12))}</div>
-              <div class="session-scope">${esc(s.badge)}</div>
-            </div>`
-            )
-            .join("")
-        : `<div class="meta-line">暂无绑定会话；各窗口将按宿主 Conversation ID 独立隔离。</div>`;
+      const sp = state.spaces.find((s) => s.space_id === state.activeSpaceId);
 
       let previewSummary = "";
       if (data.preview?.kind === "table") {
         const d = data.preview.detail;
         previewSummary =
-          `<div class="meta-line">共识别 ${d.sheet_count} 张工作表</div>` +
+          `<div class="meta-line">已识别 ${d.sheet_count} 张工作表</div>` +
           d.sheets
             .slice(0, 5)
-            .map((sh) => `<div class="kv-row"><span class="kv-key">${esc(sh.sheet_name)}</span><span class="kv-val">${sh.regions.reduce((a, r) => a + r.record_count, 0)} 条</span></div>`)
+            .map((sh) => `<div class="kv-row"><span class="kv-key">${esc(sh.sheet_name)}</span><span class="kv-val">${sh.regions.reduce((a, r) => a + r.record_count, 0)} 条记录</span></div>`)
             .join("");
       } else if (data.preview?.kind === "doc") {
         const d = data.preview.detail;
         previewSummary =
-          `<div class="meta-line">共识别 ${d.section_count} 个章节段落</div>` +
+          `<div class="meta-line">已识别 ${d.section_count} 个章节段落</div>` +
           (d.outline || [])
             .slice(0, 5)
             .map((o) => `<div class="kv-row"><span class="kv-key">${esc(o.section)}</span><span class="kv-val">${esc(o.locator)}</span></div>`)
@@ -362,26 +471,39 @@
 
       $("drawer-body").innerHTML = `
         <div class="drawer-section">
-          <h3>Antigravity 会话隔离状态</h3>
-          ${sessionsHtml}
-        </div>
-        <div class="drawer-section">
-          <h3>${esc(src.name)}</h3>
-          <div class="kv-row"><span class="kv-key">访问模式</span><span class="kv-val">只读按需提取</span></div>
-          <div class="kv-row"><span class="kv-key">本机原路径</span><span class="kv-val">${esc(src.path)}</span></div>
-          <div class="kv-row"><span class="kv-key">原件修改时间</span><span class="kv-val">${esc(src.last_mtime_iso || "—")}</span></div>
-          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-            <button class="secondary-btn" type="button" id="drawer-reveal">打开原位置</button>
-            <button class="secondary-btn" type="button" id="drawer-relink">重新关联</button>
-            <button class="danger-btn" type="button" id="drawer-remove">移除引用</button>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+            <h3 style="margin:0;">${esc(src.name)}</h3>
+            ${statusBadge(src.status)}
           </div>
+          <div class="kv-row"><span class="kv-key">类型</span><span class="kv-val">${esc(formatCategory(src))}</span></div>
+          <div class="kv-row"><span class="kv-key">规模</span><span class="kv-val">${esc(formatScale(src))}</span></div>
+          <div class="kv-row"><span class="kv-key">原件修改</span><span class="kv-val">${esc(src.last_mtime_iso || "—")}</span></div>
+          <div class="kv-row"><span class="kv-key">最近检查</span><span class="kv-val">${esc(src.last_checked_at || "—")}</span></div>
+          <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
+            <span class="kv-key" style="font-size:12px;">本机完整路径</span>
+            <button class="text-btn" type="button" id="drawer-copy-path">复制路径</button>
+          </div>
+          <div class="path-box">${esc(src.path)}</div>
         </div>
         <div class="drawer-section">
-          <h3>按需识别摘要</h3>
+          <h3>已识别内容摘要</h3>
           ${previewSummary}
-          ${data.preview ? `<button class="ghost-btn sm" style="margin-top:8px;padding-left:0;" type="button" id="drawer-full-inspect">在大弹窗查看完整结构 →</button>` : ""}
+          ${data.preview ? `<button class="ghost-btn sm" style="margin-top:8px;padding-left:0;" type="button" id="drawer-full-inspect">查看完整字段与章节结构 →</button>` : ""}
+        </div>
+        <div class="drawer-section">
+          <h3>维护操作</h3>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="secondary-btn" type="button" id="drawer-reveal">在访达中定位</button>
+            <button class="secondary-btn" type="button" id="drawer-relink">重新关联路径</button>
+            <button class="danger-btn" type="button" id="drawer-remove">移除此引用</button>
+          </div>
+          <div class="meta-line" style="margin-top:10px;">内部编号：来源 ${esc(src.source_id)}${sp ? ` · 所属空间 ${esc(sp.space_id)}` : ""}</div>
         </div>`;
 
+      $("drawer-copy-path")?.addEventListener("click", async () => {
+        await copyText(src.path);
+        toast("已复制完整路径");
+      });
       $("drawer-reveal")?.addEventListener("click", async (ev) => {
         const btn = ev.currentTarget;
         btn.disabled = true;
@@ -510,6 +632,13 @@
     $("space-form-name").value = space ? space.name : "";
     $("space-form-aliases").value = space ? (space.aliases || []).join(", ") : "";
     $("space-form-path").value = "";
+    const idHint = $("space-internal-id-hint");
+    if (space) {
+      idHint.hidden = false;
+      idHint.textContent = `内部固定编号：${space.space_id}（修改名称或简称不影响已绑定会话）`;
+    } else {
+      idHint.hidden = true;
+    }
     $("space-initial-path-wrap").hidden = Boolean(space);
     $("btn-delete-space").hidden = !space;
     $("space-form-error").hidden = true;
@@ -538,11 +667,18 @@
     else renderConnectionsView();
   }
 
-  // Unified click handler
   document.addEventListener("click", async (e) => {
     const closeBtn = e.target.closest("[data-close]");
     if (closeBtn) {
       $(closeBtn.dataset.close)?.close();
+      return;
+    }
+
+    const copyBtn = e.target.closest("[data-copy-prompt]");
+    if (copyBtn) {
+      const txt = copyBtn.dataset.copyPrompt;
+      await copyText(txt);
+      toast(`已复制指令：「${txt}」`);
       return;
     }
 
@@ -593,7 +729,6 @@
         } else if (res.ok && res.canceled) {
           toast("已取消访达选择", "warn");
         } else {
-          // Automatically expand in-modal local directory browser fallback!
           const fallbackId = pickBtn.dataset.target === "space-form-path" ? "space-browser" : "source-browser";
           toast(res.message || "已为你展开页面内目录选择器", "warn");
           await renderInModalBrowser(fallbackId, pickBtn.dataset.target, $(pickBtn.dataset.target)?.value || "");
@@ -625,22 +760,8 @@
     if (actBtn) {
       e.stopPropagation();
       const sid = actBtn.dataset.sourceId;
-      const act = actBtn.dataset.action;
-      if (act === "relink") {
+      if (actBtn.dataset.action === "relink") {
         openSourceModal("relink", sid, actBtn.dataset.path || "");
-      } else if (act === "inspect") {
-        const orig = actBtn.textContent;
-        actBtn.textContent = "读取中…";
-        try {
-          const data = await api(`/api/source-preview?source_id=${encodeURIComponent(sid)}`);
-          await openFullInspectModal(data);
-        } catch (err) {
-          toast(err.message, "err");
-        } finally {
-          actBtn.textContent = orig;
-        }
-      } else if (act === "remove") {
-        promptRemoveSource(sid, actBtn.dataset.name || "该引用");
       }
       return;
     }
@@ -651,6 +772,7 @@
     }
   });
 
+  $("btn-use-in-ai").addEventListener("click", () => openUseInAiModal());
   $("btn-new-space").addEventListener("click", () => openSpaceModal(null));
   $("btn-edit-space").addEventListener("click", () => {
     const sp = state.spaces.find((s) => s.space_id === state.activeSpaceId);
@@ -674,13 +796,9 @@
       const list = res.sources || [];
       const broken = list.filter((x) => x.status === "needs_relink").length;
       const updated = list.filter((x) => x.status === "updated").length;
-      if (broken > 0) {
-        toast(`检查完成：${broken} 项需重新关联`, "warn");
-      } else if (updated > 0) {
-        toast(`检查完成：发现 ${updated} 项原文件已更新`);
-      } else {
-        toast(`检查完成：当前空间 ${list.length} 项原文件均可正常读取`);
-      }
+      if (broken > 0) toast(`检查完成：${broken} 项需重新关联`, "warn");
+      else if (updated > 0) toast(`检查完成：发现 ${updated} 项原文件已更新`);
+      else toast(`检查完成：当前空间 ${list.length} 项原文件均可正常读取`);
     } catch (err) {
       toast(err.message, "err");
     } finally {
@@ -689,19 +807,34 @@
     }
   });
 
-  $("btn-refresh-health").addEventListener("click", async (e) => {
+  $("btn-verify-mcp").addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
-    btn.textContent = "检测中…";
+    btn.textContent = "验证中…";
     try {
-      const data = await refreshAll();
-      const sh = data.health.sources_health;
-      toast(`检测完成：本地服务运行中 · ${sh.readable}/${sh.total} 项来源可读`);
+      const res = await api("/api/antigravity/verify-mcp", {});
+      await refreshAll();
+      toast(`本机连接已验证（识别到 ${res.tool_count} 个工具）`);
     } catch (err) {
       toast(err.message, "err");
     } finally {
       btn.disabled = false;
-      btn.textContent = "重新检测";
+      btn.textContent = "验证本机连接";
+    }
+  });
+
+  $("btn-refresh-health").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "刷新中…";
+    try {
+      const data = await refreshAll();
+      toast(`状态已更新（当前阶段：${data.health.antigravity.stage_label}）`);
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "刷新状态";
     }
   });
 

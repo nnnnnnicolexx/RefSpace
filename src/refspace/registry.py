@@ -110,6 +110,13 @@ class RefSpaceRegistry:
                     citations_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS integration_events (
+                    workbench TEXT PRIMARY KEY,
+                    last_handshake_at TEXT NOT NULL DEFAULT '',
+                    last_tool_call_at TEXT NOT NULL DEFAULT '',
+                    last_read_at TEXT NOT NULL DEFAULT '',
+                    last_read_summary TEXT NOT NULL DEFAULT ''
+                );
                 """
             )
 
@@ -449,11 +456,62 @@ class RefSpaceRegistry:
         )
 
     def record_provenance(self, workbench: str, session_id: str, tool_name: str, space_ids: List[str], citations: List[dict]) -> None:
+        ts = now_iso()
+        wb = (workbench or "antigravity").strip().lower()
+        summary_parts = [f"{c.get('file', '')} · {c.get('locator', '')}".strip(" ·") for c in (citations or []) if c.get("file")]
+        summary = "；".join(summary_parts[:2])
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO provenance_logs(workbench, session_id, tool_name, space_ids_json, citations_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (workbench, session_id, tool_name, json.dumps(space_ids, ensure_ascii=False), json.dumps(citations, ensure_ascii=False), now_iso()),
+                (wb, session_id, tool_name, json.dumps(space_ids, ensure_ascii=False), json.dumps(citations, ensure_ascii=False), ts),
             )
+            conn.execute(
+                """
+                INSERT INTO integration_events(workbench, last_handshake_at, last_tool_call_at, last_read_at, last_read_summary)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(workbench) DO UPDATE SET
+                    last_tool_call_at = excluded.last_tool_call_at,
+                    last_read_at = excluded.last_read_at,
+                    last_read_summary = CASE WHEN excluded.last_read_summary != '' THEN excluded.last_read_summary ELSE integration_events.last_read_summary END
+                """,
+                (wb, ts, ts, ts, summary),
+            )
+
+    def record_workbench_touch(self, workbench: str, kind: str = "handshake", read_summary: str = "") -> None:
+        ts = now_iso()
+        wb = (workbench or "antigravity").strip().lower()
+        with self._connect() as conn:
+            cur = conn.execute("SELECT * FROM integration_events WHERE workbench = ?", (wb,)).fetchone()
+            hs = ts if kind in ("handshake", "tool_call", "read") else (cur["last_handshake_at"] if cur else "")
+            tc = ts if kind in ("tool_call", "read") else (cur["last_tool_call_at"] if cur else "")
+            rd = ts if kind == "read" else (cur["last_read_at"] if cur else "")
+            rs = read_summary if (kind == "read" and read_summary) else (cur["last_read_summary"] if cur else "")
+            conn.execute(
+                """
+                INSERT INTO integration_events(workbench, last_handshake_at, last_tool_call_at, last_read_at, last_read_summary)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(workbench) DO UPDATE SET
+                    last_handshake_at = excluded.last_handshake_at,
+                    last_tool_call_at = excluded.last_tool_call_at,
+                    last_read_at = excluded.last_read_at,
+                    last_read_summary = excluded.last_read_summary
+                """,
+                (wb, hs, tc, rd, rs),
+            )
+
+    def get_workbench_events(self, workbench: str = "antigravity") -> dict:
+        wb = (workbench or "antigravity").strip().lower()
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM integration_events WHERE workbench = ?", (wb,)).fetchone()
+            if not row:
+                return {"workbench": wb, "last_handshake_at": "", "last_tool_call_at": "", "last_read_at": "", "last_read_summary": ""}
+            return {
+                "workbench": wb,
+                "last_handshake_at": row["last_handshake_at"],
+                "last_tool_call_at": row["last_tool_call_at"],
+                "last_read_at": row["last_read_at"],
+                "last_read_summary": row["last_read_summary"],
+            }
 
     def list_recent_provenance(self, limit: int = 20) -> List[dict]:
         with self._connect() as conn:

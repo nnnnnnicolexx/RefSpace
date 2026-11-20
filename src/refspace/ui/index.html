@@ -26,7 +26,7 @@
         </button>
         <button class="nav-item" data-view="connections" id="nav-connections" type="button">
           <span>AI 连接</span>
-          <span class="status-pill is-ok" id="nav-agy-badge">检测中</span>
+          <span class="status-pill is-info" id="nav-agy-badge">检测中</span>
         </button>
       </nav>
 
@@ -54,9 +54,10 @@
               <span class="alias-badge" id="active-space-aliases" hidden></span>
               <button class="ghost-btn sm" id="btn-edit-space" type="button" hidden>编辑空间</button>
             </div>
-            <div class="meta-line" id="active-space-meta">将本机文件夹、表格与文档登记一次，原件保留在原位置供 AI 按需读取</div>
+            <div class="meta-line" id="active-space-meta">将本机文件夹、表格与文档登记一次，原件留在原位置供 AI 按需读取</div>
           </div>
           <div class="header-actions">
+            <button class="accent-outline-btn" id="btn-use-in-ai" type="button" hidden>在 AI 中使用</button>
             <button class="secondary-btn" id="btn-refresh-sources" type="button">检查更新</button>
             <button class="primary-btn" id="btn-add-source" type="button">+ 添加引用</button>
           </div>
@@ -64,7 +65,7 @@
 
         <div class="toolbar-card">
           <div class="search-wrap">
-            <input type="search" id="search-input" class="search-input" placeholder="搜索文件名、文件夹或本机路径…" aria-label="搜索当前空间引用" />
+            <input type="search" id="search-input" class="search-input" placeholder="搜索名称或路径…" aria-label="搜索当前空间引用" />
             <button class="text-btn" id="btn-clear-search" type="button" hidden>清除</button>
           </div>
           <div class="filter-pills" id="type-filters" role="tablist" aria-label="按类型筛选">
@@ -80,13 +81,10 @@
             <table class="ref-table" id="sources-table">
               <thead>
                 <tr>
-                  <th class="col-text is-sticky">名称</th>
+                  <th class="col-text">名称</th>
                   <th class="col-text">类型</th>
-                  <th class="col-num">内容规模</th>
-                  <th class="col-text">本机原路径</th>
-                  <th class="col-text">读取状态</th>
-                  <th class="col-text">最近检查</th>
-                  <th class="col-act">操作</th>
+                  <th class="col-text">状态</th>
+                  <th class="col-act"></th>
                 </tr>
               </thead>
               <tbody id="sources-tbody"></tbody>
@@ -107,27 +105,32 @@
         <header class="panel-header">
           <div class="space-heading">
             <div class="title-row">
-              <h1>AI 工作台连接与会话隔离</h1>
+              <h1>AI 连接与数据边界</h1>
             </div>
-            <div class="meta-line" id="conn-checked-meta">本地服务运行、文件可读性与各工作台连接状态分别独立检测</div>
+            <div class="meta-line" id="conn-checked-meta">区分配置文件存在、本机握手连通与实际读取成功三个阶段</div>
           </div>
           <div class="header-actions">
-            <button class="secondary-btn" id="btn-refresh-health" type="button">重新检测</button>
+            <button class="secondary-btn" id="btn-verify-mcp" type="button">验证本机连接</button>
+            <button class="secondary-btn" id="btn-refresh-health" type="button">刷新状态</button>
           </div>
         </header>
+
+        <div class="boundary-bar" id="conn-boundary-bar">
+          原文件留在本机原位置只读访问；AI 回答问题时，任务所需的相关片段或统计结果可能交给所连接的模型服务处理。
+        </div>
 
         <div class="conn-grid" id="conn-grid"></div>
 
         <div class="sub-card">
           <div class="sub-card-head">
-            <h2>活跃会话引用范围（按宿主 Conversation ID 独立保存）</h2>
+            <h2>活跃会话引用范围（按工作台会话标识独立保存）</h2>
           </div>
           <div id="sessions-table-wrap"></div>
         </div>
 
         <div class="sub-card">
           <div class="sub-card-head">
-            <h2>最近按需读取依据记录</h2>
+            <h2>最近成功读取记录</h2>
           </div>
           <div id="provenance-list-wrap"></div>
         </div>
@@ -137,12 +140,25 @@
     <!-- On-demand Right Detail Drawer -->
     <aside class="detail-drawer" id="detail-drawer" hidden>
       <div class="drawer-head">
-        <span class="drawer-title">引用详情与会话状态</span>
+        <span class="drawer-title">引用详情</span>
         <button class="icon-btn" id="btn-close-drawer" type="button" aria-label="关闭详情">✕</button>
       </div>
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
+
+  <!-- "Use in AI" Guide & Copyable Prompts Modal -->
+  <dialog class="modal-md" id="use-ai-dialog">
+    <div class="modal-head">
+      <h2 id="use-ai-title">在 AI 中使用</h2>
+      <button class="icon-btn" type="button" data-close="use-ai-dialog" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="use-ai-body"></div>
+    <div class="modal-foot">
+      <span class="meta-line">原件留在本机，所需内容可能交给所连接的模型处理</span>
+      <button class="primary-btn" type="button" data-close="use-ai-dialog">知道了</button>
+    </div>
+  </dialog>
 
   <!-- Space Create/Edit Dialog -->
   <dialog class="modal-sm" id="space-dialog">
@@ -159,6 +175,7 @@
         <label class="field-label">调用简称（多个用逗号分隔，改名不影响已有会话）
           <input type="text" id="space-form-aliases" class="text-input" placeholder="例如：杭州仓, 华东仓" />
         </label>
+        <div class="meta-line" id="space-internal-id-hint" hidden></div>
         <div id="space-initial-path-wrap">
           <label class="field-label">初始关联路径（可选，留空也可先创建空间）
             <input type="text" id="space-form-path" class="text-input" placeholder="/Work/杭州仓/" />
@@ -230,7 +247,7 @@
     </div>
   </dialog>
 
-  <!-- Near-fullscreen Structure Inspection Modal (16px margin on desktop) -->
+  <!-- Near-fullscreen Structure Inspection Modal -->
   <dialog class="modal-full" id="inspect-dialog">
     <div class="modal-head">
       <h2 id="inspect-dialog-title">已识别结构详情</h2>

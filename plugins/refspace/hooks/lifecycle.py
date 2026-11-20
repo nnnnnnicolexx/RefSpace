@@ -90,6 +90,7 @@ def main() -> None:
 
         # Direct eager MCP tool call (e.g. mcp_refspace_bind_scope)
         if t_name.startswith("mcp_refspace_"):
+            reg.record_workbench_touch("antigravity", kind="handshake")
             sys.stdout.write(
                 json.dumps(
                     {
@@ -107,6 +108,7 @@ def main() -> None:
 
         # Lazy MCP tool call via call_mcp_tool(ServerName="refspace", ...)
         if t_name == "call_mcp_tool" and str(t_args.get("ServerName") or "") in ("refspace", "refspace_refspace"):
+            reg.record_workbench_touch("antigravity", kind="handshake")
             inner_args = dict(t_args.get("Arguments") or {})
             inner_args["session_id"] = conv_id
             inner_args["workbench"] = "antigravity"

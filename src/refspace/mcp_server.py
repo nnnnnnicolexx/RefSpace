@@ -166,6 +166,7 @@ class RefSpaceMCPDispatcher:
     def call_tool(self, name: str, args: Optional[Dict[str, Any]]) -> dict:
         arguments = args or {}
         wb, sid = self._resolve_session(arguments)
+        self.registry.record_workbench_touch(wb, kind="tool_call")
 
         try:
             if name == "refspace_bind_scope":
@@ -211,6 +212,7 @@ class RefSpaceMCPDispatcher:
                     category=str(arguments.get("category") or "all"),
                     limit=int(arguments.get("limit") or 30),
                 )
+                self.registry.record_workbench_touch(wb, kind="read", read_summary=f"定位范围文件（匹配 {res.get('matched_count', 0)} 项）")
                 return {"ok": True, **res}
 
             if name == "refspace_read_doc":
@@ -273,6 +275,9 @@ class RefSpaceMCPDispatcher:
             return None
 
         if method == "initialize":
+            client_info = params.get("clientInfo") or {}
+            wb_guess = "antigravity" if "antigravity" in str(client_info.get("name") or "").lower() else os.environ.get("REFSPACE_WORKBENCH", "antigravity")
+            self.registry.record_workbench_touch(wb_guess, kind="handshake")
             req_proto = params.get("protocolVersion") or "2024-11-05"
             return {
                 "jsonrpc": "2.0",
@@ -288,6 +293,7 @@ class RefSpaceMCPDispatcher:
             return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
 
         if method == "tools/list":
+            self.registry.record_workbench_touch(os.environ.get("REFSPACE_WORKBENCH", "antigravity"), kind="handshake")
             return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": MCP_TOOLS_SCHEMA}}
 
         if method == "tools/call":

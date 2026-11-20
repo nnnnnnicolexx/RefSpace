@@ -24,26 +24,83 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 def check_antigravity_integration(registry: RefSpaceRegistry, session_mgr: SessionScopeManager) -> dict:
     workspace_plugin = REPO_ROOT / "plugins" / "refspace" / "plugin.json"
     workspace_manifest = REPO_ROOT / ".agents" / "plugins.json"
+    workspace_mcp = REPO_ROOT / "plugins" / "refspace" / "mcp_config.json"
     global_plugin = Path.home() / ".gemini" / "config" / "plugins" / "refspace" / "plugin.json"
 
-    ws_ready = workspace_plugin.is_file() and workspace_manifest.is_file()
+    ws_ready = workspace_plugin.is_file() and workspace_manifest.is_file() and workspace_mcp.is_file()
     global_ready = global_plugin.is_file()
+    config_found = ws_ready or global_ready
+
+    ev = registry.get_workbench_events("antigravity")
     active_sessions = session_mgr.list_active_sessions()
+
+    connection_verified = config_found and bool(ev["last_handshake_at"] or ev["last_tool_call_at"] or active_sessions)
+    read_succeeded = connection_verified and bool(ev["last_read_at"])
+
+    if read_succeeded:
+        stage = "read_succeeded"
+        stage_label = "读取成功"
+    elif connection_verified:
+        stage = "connection_verified"
+        stage_label = "连接已验证"
+    elif config_found:
+        stage = "config_found"
+        stage_label = "配置已发现"
+    else:
+        stage = "unconfigured"
+        stage_label = "未配置"
 
     return {
         "workbench": "Antigravity",
-        "connected": ws_ready or global_ready,
-        "scope": "全局与当前工作区均可用" if (ws_ready and global_ready) else ("当前工作区插件就绪" if ws_ready else ("全局插件就绪" if global_ready else "未检测到插件配置")),
+        "connected": config_found,
+        "stage": stage,
+        "stage_label": stage_label,
+        "steps": {
+            "config_found": config_found,
+            "connection_verified": connection_verified,
+            "read_succeeded": read_succeeded,
+        },
+        "last_handshake_at": ev["last_handshake_at"],
+        "last_tool_call_at": ev["last_tool_call_at"],
+        "last_read_at": ev["last_read_at"],
+        "last_read_summary": ev["last_read_summary"],
+        "scope": "全局与当前工作区均可用" if (ws_ready and global_ready) else ("当前工作区配置已发现" if ws_ready else ("全局配置已发现" if global_ready else "未检测到插件配置")),
         "workspace_plugin_ready": ws_ready,
         "global_plugin_ready": global_ready,
         "hooks_isolation_enabled": (REPO_ROOT / "plugins" / "refspace" / "hooks.json").is_file() or (global_plugin.parent / "hooks.json").is_file(),
         "active_session_count": len(active_sessions),
         "active_sessions": active_sessions,
+        "data_boundary_note": "原文件始终留在本机原位置只读访问；AI 回答问题时，按需提取的片段或统计结果会交给所连接的模型服务处理。",
         "candidate_platforms": [
-            {"name": "Claude Desktop / Cursor / Codex", "status": "可通过本地 Stdio / HTTP MCP 接入（待逐端实测会话隔离）"},
-            {"name": "豆包 / 千问等网页工作台", "status": "尚未适配（网页端不支持直连本机 MCP，需后续浏览器桥接扩展）"},
+            {"name": "Claude Desktop / Cursor / Codex", "status": "可通过本地 Stdio / HTTP MCP 接入（待逐端验证会话隔离与读取）"},
+            {"name": "豆包 / 千问等网页工作台", "status": "尚未适配（网页端不支持直连本机服务，需后续扩展桥接）"},
         ],
     }
+
+
+def _verify_local_mcp_subprocess(db_path: str) -> dict:
+    plugin_dir = REPO_ROOT / "plugins" / "refspace"
+    entry = plugin_dir / "run_mcp.py"
+    if not entry.is_file():
+        raise RegistryError("MCP_ENTRY_MISSING", f"未找到 MCP 启动入口：{entry}")
+    env = dict(os.environ)
+    env["REFSPACE_DB_PATH"] = db_path
+    env["PLUGIN_ROOT"] = str(plugin_dir)
+    reqs = (
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "clientInfo": {"name": "antigravity-selfcheck"}}})
+        + "\n"
+        + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+        + "\n"
+    )
+    proc = subprocess.run([sys.executable, str(entry)], input=reqs, capture_output=True, text=True, env=env, timeout=8)
+    if proc.returncode != 0:
+        raise RegistryError("MCP_HANDSHAKE_FAILED", f"MCP 进程异常退出：{proc.stderr.strip()}")
+    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        raise RegistryError("MCP_HANDSHAKE_FAILED", "MCP 进程未返回完整握手响应")
+    tools_payload = json.loads(lines[1])
+    tools = [t.get("name") for t in (tools_payload.get("result", {}).get("tools") or [])]
+    return {"ok": True, "tool_count": len(tools), "tools": tools, "verified_at": now_iso()}
 
 
 def build_health_report(registry: RefSpaceRegistry, session_mgr: SessionScopeManager) -> dict:
@@ -303,6 +360,11 @@ def create_http_server(host: str = "127.0.0.1", port: int = 17890, db_path: Opti
 
                 if route == "/api/system/reveal":
                     res = _reveal_in_finder(str(body.get("path") or ""))
+                    self._send_json(res, status=200)
+                    return
+
+                if route == "/api/antigravity/verify-mcp":
+                    res = _verify_local_mcp_subprocess(registry.db_path)
                     self._send_json(res, status=200)
                     return
 
